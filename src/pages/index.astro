@@ -1,15 +1,778 @@
 ---
+const cesiumToken = import.meta.env.PUBLIC_CESIUM_TOKEN;
+
+const destinations = [
+  {
+    country: "Papua New Guinea",
+    place: "Goroka",
+    href: "/papua-new-guinea/goroka",
+    lat: -6.0834,
+    lng: 145.3873,
+  },
+  {
+    country: "Timor-Leste",
+    place: "Dili",
+    href: "/timor-leste/dili",
+    lat: -8.5569,
+    lng: 125.5603,
+  },
+  {
+    country: "Indonesia",
+    place: "Bali",
+    href: "/indonesia/bali",
+    lat: -8.4095,
+    lng: 115.1889,
+  },
+  {
+    country: "Hong Kong",
+    place: "Hong Kong",
+    href: "/hong-kong",
+    lat: 22.3193,
+    lng: 114.1694,
+  },
+];
 ---
+
+<!doctype html>
 
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+
     <title>Tatsujin Travel</title>
+
+    <meta
+      name="description"
+      content="Travel archive by Tatsuto Goto."
+    />
+
+    <link
+      rel="stylesheet"
+      href="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Widgets/widgets.css"
+    />
+
+    <script
+      is:inline
+      src="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Cesium.js"
+    ></script>
   </head>
 
   <body>
-    <h1>Tatsujin Travel</h1>
-    <p>世界を旅する記録</p>
+    <header class="header">
+      <a href="/" class="brand">
+        <strong>TATSUJIN</strong>
+        <span>TRAVEL</span>
+      </a>
+
+      <nav>
+        <a href="/">MAP</a>
+        <a href="#destinations">DESTINATIONS</a>
+        <a href="/about">ABOUT</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="intro">
+          <p class="label">TRAVEL ARCHIVE</p>
+
+          <h1>
+            Places<br />
+            I've been.
+          </h1>
+
+          <p class="subtext">Tatsuto Goto</p>
+        </div>
+
+        <div class="globe-area">
+          <div
+            id="cesiumContainer"
+            data-token={cesiumToken}
+          ></div>
+
+          <p class="globe-guide">
+            DRAG TO ROTATE · SCROLL TO ZOOM · SELECT A PLACE
+          </p>
+        </div>
+
+        <aside class="destinations" id="destinations">
+          <div class="destination-heading">
+            <span>DESTINATIONS</span>
+            <span>
+              {String(destinations.length).padStart(2, "0")}
+            </span>
+          </div>
+
+          {
+            destinations.map((destination, index) => (
+              <button
+                class="destination"
+                type="button"
+                data-lat={destination.lat}
+                data-lng={destination.lng}
+                data-href={destination.href}
+                data-place={destination.place}
+              >
+                <span class="number">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+
+                <span class="place">
+                  <strong>{destination.place}</strong>
+                  <small>{destination.country}</small>
+                </span>
+
+                <span class="arrow">↗</span>
+              </button>
+            ))
+          }
+        </aside>
+      </section>
+    </main>
+
+    <script is:inline>
+      const container =
+        document.getElementById("cesiumContainer");
+
+      const token = container?.dataset.token;
+
+      if (!token) {
+        console.error("Cesium token was not found.");
+      } else {
+        Cesium.Ion.defaultAccessToken = token;
+
+        const viewer = new Cesium.Viewer(
+          "cesiumContainer",
+          {
+            animation: false,
+            timeline: false,
+            baseLayerPicker: false,
+            geocoder: false,
+            homeButton: false,
+            navigationHelpButton: false,
+            sceneModePicker: false,
+            fullscreenButton: false,
+            infoBox: false,
+            selectionIndicator: false,
+
+            terrain:
+              Cesium.Terrain.fromWorldTerrain(),
+          }
+        );
+
+        viewer.clock.shouldAnimate = false;
+        viewer.trackedEntity = undefined;
+
+        viewer.scene.globe.enableLighting = false;
+
+        viewer.scene.backgroundColor =
+          Cesium.Color.WHITE;
+
+        viewer.scene.skyBox.show = false;
+        viewer.scene.sun.show = false;
+        viewer.scene.moon.show = false;
+
+        const controller =
+          viewer.scene.screenSpaceCameraController;
+
+        // 慣性移動を完全に消す
+        controller.inertiaSpin = 0;
+        controller.inertiaTranslate = 0;
+        controller.inertiaZoom = 0;
+
+        // 操作方法を限定
+        controller.rotateEventTypes = [
+          Cesium.CameraEventType.LEFT_DRAG,
+        ];
+
+        controller.zoomEventTypes = [
+          Cesium.CameraEventType.WHEEL,
+          Cesium.CameraEventType.PINCH,
+        ];
+
+        // 最初の地球の位置
+        viewer.camera.setView({
+          destination:
+            Cesium.Cartesian3.fromDegrees(
+              135,
+              5,
+              17500000
+            ),
+
+          orientation: {
+            heading: 0,
+            pitch:
+              -Cesium.Math.PI_OVER_TWO,
+            roll: 0,
+          },
+        });
+
+        viewer.camera.cancelFlight();
+
+        /*
+         * --------------------------------------------------
+         * 勝手に動かないためのカメラロック
+         * --------------------------------------------------
+         */
+
+        let userIsControlling = false;
+        let wheelTimer;
+
+        const frozenCamera = {
+          position:
+            Cesium.Cartesian3.clone(
+              viewer.camera.positionWC
+            ),
+
+          heading: viewer.camera.heading,
+          pitch: viewer.camera.pitch,
+          roll: viewer.camera.roll,
+        };
+
+        function saveCurrentCamera() {
+          frozenCamera.position =
+            Cesium.Cartesian3.clone(
+              viewer.camera.positionWC
+            );
+
+          frozenCamera.heading =
+            viewer.camera.heading;
+
+          frozenCamera.pitch =
+            viewer.camera.pitch;
+
+          frozenCamera.roll =
+            viewer.camera.roll;
+        }
+
+        function lockCamera() {
+          viewer.camera.cancelFlight();
+
+          saveCurrentCamera();
+
+          userIsControlling = false;
+        }
+
+        /*
+         * ユーザーが操作していない間は、
+         * カメラを保存位置に固定
+         */
+        viewer.scene.preRender.addEventListener(
+          () => {
+            if (userIsControlling) return;
+
+            viewer.camera.setView({
+              destination:
+                frozenCamera.position,
+
+              orientation: {
+                heading:
+                  frozenCamera.heading,
+
+                pitch:
+                  frozenCamera.pitch,
+
+                roll:
+                  frozenCamera.roll,
+              },
+            });
+          }
+        );
+
+        /*
+         * マウスを押している間だけ
+         * 地球儀を自由に動かせる
+         */
+        container.addEventListener(
+          "pointerdown",
+          () => {
+            viewer.camera.cancelFlight();
+            userIsControlling = true;
+          }
+        );
+
+        window.addEventListener(
+          "pointerup",
+          () => {
+            lockCamera();
+          }
+        );
+
+        /*
+         * ホイール操作中だけズームを許可
+         */
+        container.addEventListener(
+          "wheel",
+          () => {
+            viewer.camera.cancelFlight();
+
+            userIsControlling = true;
+
+            clearTimeout(wheelTimer);
+
+            wheelTimer = setTimeout(
+              () => {
+                lockCamera();
+              },
+              150
+            );
+          },
+          { passive: true }
+        );
+
+        /*
+         * --------------------------------------------------
+         * 訪問地点
+         * --------------------------------------------------
+         */
+
+        const buttons =
+          document.querySelectorAll(
+            ".destination"
+          );
+
+        buttons.forEach((button) => {
+          const lat =
+            Number(button.dataset.lat);
+
+          const lng =
+            Number(button.dataset.lng);
+
+          const place =
+            button.dataset.place;
+
+          const href =
+            button.dataset.href;
+
+          const entity =
+            viewer.entities.add({
+              position:
+                Cesium.Cartesian3.fromDegrees(
+                  lng,
+                  lat,
+                  100
+                ),
+
+              point: {
+                pixelSize: 9,
+
+                color:
+                  Cesium.Color.fromCssColorString(
+                    "#111111"
+                  ),
+
+                outlineColor:
+                  Cesium.Color.WHITE,
+
+                outlineWidth: 3,
+
+                disableDepthTestDistance:
+                  Number.POSITIVE_INFINITY,
+              },
+
+              label: {
+                text:
+                  place.toUpperCase(),
+
+                font:
+                  "600 11px Arial",
+
+                fillColor:
+                  Cesium.Color.fromCssColorString(
+                    "#111111"
+                  ),
+
+                outlineColor:
+                  Cesium.Color.WHITE,
+
+                outlineWidth: 3,
+
+                style:
+                  Cesium.LabelStyle
+                    .FILL_AND_OUTLINE,
+
+                pixelOffset:
+                  new Cesium.Cartesian2(
+                    0,
+                    -26
+                  ),
+
+                disableDepthTestDistance:
+                  Number.POSITIVE_INFINITY,
+              },
+            });
+
+          entity.travelUrl = href;
+
+          /*
+           * 右側の都市名を押した時だけ
+           * 自動移動を許可
+           */
+          button.addEventListener(
+            "click",
+            () => {
+              userIsControlling = true;
+
+              viewer.camera.flyTo({
+                destination:
+                  Cesium.Cartesian3.fromDegrees(
+                    lng,
+                    lat,
+                    900000
+                  ),
+
+                duration: 1.5,
+
+                complete: () => {
+                  lockCamera();
+                },
+
+                cancel: () => {
+                  lockCamera();
+                },
+              });
+            }
+          );
+        });
+
+        /*
+         * 地球上の地点をクリック
+         */
+        viewer.screenSpaceEventHandler
+          .setInputAction(
+            (movement) => {
+              const picked =
+                viewer.scene.pick(
+                  movement.position
+                );
+
+              if (
+                Cesium.defined(picked) &&
+                picked.id &&
+                picked.id.travelUrl
+              ) {
+                window.location.href =
+                  picked.id.travelUrl;
+              }
+            },
+
+            Cesium.ScreenSpaceEventType
+              .LEFT_CLICK
+          );
+      }
+    </script>
   </body>
 </html>
+
+<style>
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(body) {
+    margin: 0;
+
+    background: #ffffff;
+    color: #161616;
+
+    font-family:
+      Arial,
+      Helvetica,
+      sans-serif;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .header {
+    height: 76px;
+
+    padding: 0 4vw;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    border-bottom:
+      1px solid #e8e8e8;
+
+    background: #ffffff;
+  }
+
+  .brand {
+    display: flex;
+    gap: 7px;
+
+    letter-spacing: 0.08em;
+  }
+
+  .brand strong {
+    font-size: 0.96rem;
+  }
+
+  .brand span {
+    color: #8d8d8d;
+
+    font-size: 0.96rem;
+  }
+
+  nav {
+    display: flex;
+
+    gap: 34px;
+  }
+
+  nav a {
+    font-size: 0.65rem;
+
+    letter-spacing: 0.18em;
+
+    color: #777777;
+  }
+
+  .hero {
+    min-height:
+      calc(100vh - 76px);
+
+    padding:
+      3vw 4vw 2vw;
+
+    display: grid;
+
+    grid-template-columns:
+      minmax(170px, 0.6fr)
+      minmax(500px, 1.8fr)
+      minmax(260px, 0.8fr);
+
+    gap: 3vw;
+  }
+
+  .intro {
+    padding-top: 5vh;
+  }
+
+  .label {
+    margin:
+      0 0 20px;
+
+    color: #a0a0a0;
+
+    font-size: 0.58rem;
+
+    letter-spacing: 0.24em;
+  }
+
+  h1 {
+    margin: 0;
+
+    font-family:
+      Georgia,
+      "Times New Roman",
+      serif;
+
+    font-size:
+      clamp(
+        3.2rem,
+        5vw,
+        6.3rem
+      );
+
+    font-weight: 400;
+
+    line-height: 0.92;
+
+    letter-spacing: -0.055em;
+  }
+
+  .subtext {
+    margin-top: 30px;
+
+    color: #969696;
+
+    font-size: 0.65rem;
+
+    letter-spacing: 0.15em;
+
+    text-transform: uppercase;
+  }
+
+  .globe-area {
+    min-width: 0;
+
+    display: flex;
+
+    flex-direction: column;
+  }
+
+  #cesiumContainer {
+    width: 100%;
+
+    height: 73vh;
+
+    overflow: hidden;
+
+    border:
+      1px solid #eeeeee;
+
+    background: #ffffff;
+
+    cursor: grab;
+  }
+
+  #cesiumContainer:active {
+    cursor: grabbing;
+  }
+
+  .globe-guide {
+    margin:
+      12px 0 0;
+
+    text-align: center;
+
+    color: #aaaaaa;
+
+    font-size: 0.5rem;
+
+    letter-spacing: 0.18em;
+  }
+
+  .destinations {
+    padding-top: 5vh;
+  }
+
+  .destination-heading {
+    display: flex;
+
+    justify-content:
+      space-between;
+
+    padding-bottom: 14px;
+
+    border-bottom:
+      1px solid #d9d9d9;
+
+    color: #999999;
+
+    font-size: 0.56rem;
+
+    letter-spacing: 0.18em;
+  }
+
+  .destination {
+    width: 100%;
+
+    padding: 20px 4px;
+
+    border: 0;
+
+    border-bottom:
+      1px solid #e9e9e9;
+
+    display: grid;
+
+    grid-template-columns:
+      35px 1fr auto;
+
+    align-items: center;
+
+    gap: 10px;
+
+    background: transparent;
+
+    cursor: pointer;
+
+    text-align: left;
+  }
+
+  .destination:hover {
+    background: #fafafa;
+  }
+
+  .number {
+    color: #b0b0b0;
+
+    font-size: 0.57rem;
+  }
+
+  .place {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 5px;
+  }
+
+  .place strong {
+    font-family:
+      Georgia,
+      "Times New Roman",
+      serif;
+
+    font-size: 1.06rem;
+
+    font-weight: 400;
+  }
+
+  .place small {
+    color: #999999;
+
+    font-size: 0.61rem;
+  }
+
+  .arrow {
+    color: #999999;
+  }
+
+  :global(.cesium-viewer-toolbar) {
+    display: none;
+  }
+
+  :global(.cesium-widget-credits) {
+    font-size: 8px;
+  }
+
+  @media (max-width: 1050px) {
+    .hero {
+      grid-template-columns:
+        1fr;
+    }
+
+    #cesiumContainer {
+      height: 65vh;
+    }
+
+    .destinations {
+      padding-bottom: 50px;
+    }
+  }
+
+  @media (max-width: 650px) {
+    .header {
+      height: 66px;
+
+      padding: 0 20px;
+    }
+
+    nav {
+      display: none;
+    }
+
+    .hero {
+      padding: 28px 20px;
+    }
+
+    h1 {
+      font-size: 3.7rem;
+    }
+
+    #cesiumContainer {
+      height: 58vh;
+    }
+  }
+</style>
